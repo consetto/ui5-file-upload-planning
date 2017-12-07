@@ -1,0 +1,143 @@
+*----------------------------------------------------------------------
+*   UI5 FILE UPLOAD PLANNING FUNCTION
+*   Author: Waleed Iqbal              Date: 30/11/2017
+*   www.consetto.com
+*----------------------------------------------------------------------
+class ZCL_ZFILEUPLOAD_DPC_EXT definition
+  public
+  inheriting from ZCL_ZFILEUPLOAD_DPC
+  create public .
+
+public section.
+
+  methods /IWBEP/IF_MGW_APPL_SRV_RUNTIME~CREATE_STREAM
+    redefinition .
+protected section.
+
+  methods UPLOAD_MAPSET_GET_ENTITYSET
+    redefinition .
+private section.
+ENDCLASS.
+
+
+
+CLASS ZCL_ZFILEUPLOAD_DPC_EXT IMPLEMENTATION.
+
+
+  method /IWBEP/IF_MGW_APPL_SRV_RUNTIME~CREATE_STREAM.
+    DATA: ls_hdr_param   TYPE ihttpnvp,
+      lt_hdr_params  TYPE tihttpnvp,
+      ls_file        TYPE ZFILE_UPLOAD,
+      lv_xstring     TYPE xstring,
+      base64_string  TYPE string,
+      base64_xstring TYPE xstring,
+      i_msg_str      TYPE string,
+      l_msg_str      TYPE string,
+      l_sub_str      TYPE string,
+      ls_bapiret     TYPE bapiret2,
+      lt_bapiret     TYPE TABLE OF bapiret2,
+      lo_convert     TYPE REF TO cl_abap_conv_in_ce,
+      lo_facade      TYPE REF TO /iwbep/if_mgw_dp_int_facade,
+      lr_application TYPE REF TO cl_rsbolap_application,
+      lr_data_area   TYPE REF TO if_rsbolap_data_area,
+      lr_olap_area   TYPE REF TO cl_rsr_olap_area,
+      lv_sequence    TYPE RSPLS_SEQNM,
+      ls_header      TYPE ihttpnvp.
+
+    FIELD-SYMBOLS:
+      <wa_return>     TYPE any.
+
+    lo_facade ?= /iwbep/if_mgw_conv_srv_runtime~get_dp_facade( ).
+    lt_hdr_params = lo_facade->get_request_header( ).
+
+*   Read the header parameters
+    CASE iv_entity_name.
+    WHEN 'UPLOAD_MAP'.
+        READ TABLE lt_hdr_params into ls_hdr_param WITH KEY name = 'slug'.
+        IF sy-subrc = 0.
+          ls_file-filename = ls_hdr_param-value.
+        ENDIF.
+        READ TABLE lt_hdr_params into ls_hdr_param WITH KEY name = 'content-type'.
+        IF sy-subrc = 0.
+          ls_file-mimetype = ls_hdr_param-value.
+        ENDIF.
+        READ TABLE lt_hdr_params into ls_hdr_param WITH KEY name = 'ps-name'.
+        IF sy-subrc = 0.
+          lv_sequence = ls_hdr_param-value.
+        ENDIF.
+    ENDCASE.
+
+*   Read the base64 data from UI5 in xstring
+    lv_xstring  = is_media_resource-value.
+    lo_convert  = cl_abap_conv_in_ce=>create( ).
+
+*   convert the xstring value to base64 string
+    lo_convert->convert( EXPORTING input = lv_xstring
+                          IMPORTING data  = base64_string ).
+
+*   convert the base64 string to xstring
+    CALL FUNCTION 'SSFC_BASE64_DECODE'
+      EXPORTING
+        b64data = base64_string
+      IMPORTING
+        bindata = base64_xstring
+      EXCEPTIONS
+        OTHERS  = 2.
+
+*   store the xstring value in memory for global access
+    export base64_xstring from base64_xstring to memory id 'z_upload_data'.
+
+*   Execute planning sequence
+    CALL FUNCTION 'RSPLSSE_PLSEQ_EXECUTE'
+      EXPORTING
+        i_seqnm        = lv_sequence
+        i_fast_enqueue = rs_c_true
+      TABLES
+        e_tk_return    = lt_bapiret.
+
+*   Format messages for returning to UI5
+    LOOP AT lt_bapiret INTO ls_bapiret.
+      CALL FUNCTION 'FORMAT_MESSAGE'
+        EXPORTING
+          id    = ls_bapiret-id
+          lang  = sy-langu
+          no    = ls_bapiret-number
+          v1    = ls_bapiret-message_v1
+          v2    = ls_bapiret-message_v2
+          v3    = ls_bapiret-message_v3
+          v4    = ls_bapiret-message_v4
+        IMPORTING
+          msg   = i_msg_str
+        EXCEPTIONS
+          not_found = 1
+          OTHERS    = 2.
+      CONCATENATE i_msg_str '\n' INTO l_sub_str.
+      CONCATENATE l_msg_str l_sub_str INTO l_msg_str.
+    ENDLOOP.
+
+*   Initialize BI-IP application
+    lr_application = cl_rspls_plan_application=>get( ).
+    lr_data_area   = lr_application->get_data_area( ).
+
+*   Save data
+    lr_data_area->save( ).
+
+    lr_olap_area = lr_data_area->get_olap_area( ).
+    IF lr_olap_area->n_save_error = rs_c_false.
+*     Data successfully saved
+    ELSE.
+*     Error while saving data.
+    ENDIF.
+
+*   Return the messages to UI5 in custom header value
+    ls_header-name  = 'custom-message'.
+    ls_header-value = l_msg_str.
+    /iwbep/if_mgw_conv_srv_runtime~set_header( is_header = ls_header ).
+
+  endmethod.
+
+
+  method UPLOAD_MAPSET_GET_ENTITYSET.
+
+  endmethod.
+ENDCLASS.
