@@ -1,0 +1,106 @@
+*----------------------------------------------------------------------
+*   UI5 FILE UPLOAD PLANNING FUNCTION
+*   Author: Waleed Iqbal              Date: 30/11/2017
+*   www.consetto.com
+*----------------------------------------------------------------------
+class ZPF_FILE_UPLOAD definition
+  public
+  final
+  create public .
+
+public section.
+
+  interfaces IF_RSPLFA_SRVTYPE_IMP_EXEC .
+protected section.
+private section.
+ENDCLASS.
+
+
+
+CLASS ZPF_FILE_UPLOAD IMPLEMENTATION.
+
+
+  method IF_RSPLFA_SRVTYPE_IMP_EXEC~EXECUTE.
+    DATA:
+      l_data            TYPE string,
+      l_file_content    TYPE xstring,
+      l_t_column        TYPE string,
+      l_r_converter     TYPE REF TO cl_abap_conv_in_ce,
+      l_r_output_line   TYPE REF TO data,
+      l_t_data          TYPE TABLE OF string,
+      l_t_header        TYPE TABLE OF string,
+      l_t_line          TYPE TABLE OF string.
+
+    DATA:
+      BEGIN OF crlf,
+        cr  TYPE c,
+        lf  TYPE c,
+      END OF crlf,
+      l_s_data          TYPE string.
+
+    FIELD-SYMBOLS:
+      <l_s_data>        TYPE any,
+      <l_s_output>      TYPE any,
+      <l_field>         TYPE any,
+      <l_tab_data>      TYPE any.
+
+*   Read xstring containing file content
+    import base64_xstring to l_file_content from memory id 'z_upload_data'.
+
+*   Convert file content to string
+      TRY.
+          CALL METHOD cl_abap_conv_in_ce=>create
+            EXPORTING
+              input       = l_file_content
+              encoding    = 'DEFAULT'
+              replacement = '#'
+              ignore_cerr = abap_false
+            RECEIVING
+              conv        = l_r_converter.
+
+          CALL METHOD l_r_converter->read
+            IMPORTING
+              data = l_data.
+
+        CATCH cx_root.
+        EXIT.
+      ENDTRY.
+
+    crlf = cl_abap_char_utilities=>cr_lf.
+
+*   Convert CRLF to LF
+    REPLACE ALL OCCURRENCES OF crlf IN l_data WITH crlf-lf.
+
+*   Convert CR to LF
+    TRANSLATE l_data USING crlf.
+
+*   Split into table lines
+    SPLIT l_data AT crlf-lf INTO TABLE l_t_data.
+
+*   Make copy of data
+    create data l_r_output_line LIKE LINE OF c_th_data.
+    ASSIGN l_r_output_line->* to <l_s_output>.
+
+*   Read first line of table
+    READ TABLE l_t_data INTO l_s_data INDEX 1.
+
+*   Split the first line (header) of the table
+    SPLIT l_s_data AT ',' INTO TABLE l_t_header.
+
+*   Loop remaining lines except the file header
+    LOOP AT l_t_data assigning <l_s_data> FROM 2.
+      "split current line
+      SPLIT <l_s_data> AT ',' INTO TABLE l_t_line.
+
+      "loop over the header split
+      LOOP AT l_t_header assigning <l_tab_data>.
+        read table l_t_line index SY-tabix into l_t_column.
+        ASSIGN COMPONENT <l_tab_data> of structure <l_s_output> to <l_field>.
+        <l_field> = l_t_column.
+      ENDLOOP.
+*     Modify c_th_data from internal structure
+      MODIFY table c_th_data from <l_s_output>.
+    ENDLOOP.
+
+  endmethod.
+ENDCLASS.
